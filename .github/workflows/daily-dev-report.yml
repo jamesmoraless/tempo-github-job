@@ -1,0 +1,74 @@
+name: Daily Dev Activity Report
+
+on:
+  schedule:
+    # Runs daily at 22:00 UTC (≈ 5pm ET)
+    - cron: "0 22 * * *"
+  workflow_dispatch: {}  # Allows manual triggering from GitHub UI
+
+jobs:
+  generate-report:
+    runs-on: ubuntu-latest
+    
+    # Required secrets:
+    # - ANTHROPIC_API_KEY: Your Anthropic API key for Claude
+    # - SLACK_WEBHOOK_URL: Your Slack webhook URL for posting messages
+    # - GITHUB_TOKEN: Automatically provided by GitHub Actions (no need to set manually)
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch full history for commit queries
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install requests
+      
+      - name: Collect GitHub activity
+        id: collect
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python .github/scripts/collect_activity_single_repo.py > activity.json
+          echo "activity_json<<EOF" >> $GITHUB_OUTPUT
+          cat activity.json >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+      
+      - name: Generate report with Claude
+        id: claude
+        uses: anthropics/claude-code-action@beta
+        with:
+          api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            You are generating a daily dev activity report for this GitHub repo.
+            
+            Group by developer.
+            List PRs and commits touched in the last 24 hours.
+            Output Slack-friendly Markdown.
+            
+            Activity data:
+            ${{ steps.collect.outputs.activity_json }}
+      
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+      
+      - name: Post to Slack
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          CLAUDE_OUTPUT: ${{ steps.claude.outputs.completion }}
+        run: |
+          # Escape the output for JSON and send to Slack
+          # Note: If the output name differs, check the action's documentation
+          # Common alternatives: steps.claude.outputs.response or steps.claude.outputs.text
+          REPORT_TEXT=$(echo "$CLAUDE_OUTPUT" | jq -Rs .)
+          curl -X POST -H 'Content-type: application/json' \
+            --data "{\"text\": $REPORT_TEXT}" \
+            "$SLACK_WEBHOOK_URL"
+
