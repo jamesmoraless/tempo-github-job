@@ -46,37 +46,38 @@ jobs:
       
       - name: Generate report with Claude
         id: claude
-        continue-on-error: true          # 👈 don’t fail whole job if Claude errors (e.g. no credit)
-        env:
-          MODE: agent                     # 👈 force the action out of tag mode
         uses: anthropics/claude-code-action@beta
         with:
-          mode: agent                     # 👈 also tell it via inputs
+          mode: agent  # Required for automation events (workflow_dispatch, schedule)
           model: claude-3-5-sonnet-20241022
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          trigger_phrase: ""              # 👈 disable tag-based triggers
-          label_trigger: ""               # 👈 disable label-based triggers
           direct_prompt: |
-            You are generating a *daily dev activity report* for this GitHub repo.
-            You will receive JSON of PRs and commits from the last 24 hours.
-            Your tasks:
-            1. If there is no activity, say: "No activity in the last 24 hours."
-            2. Otherwise, group by developer (GitHub login if present).
-            3. For each developer, list PRs (number, title, merged/open) and commits (message).
-            4. Output Slack-friendly Markdown, short.
-
+            You are generating a daily dev activity report for this GitHub repo.
+            
+            Group by developer.
+            List PRs and commits touched in the last 24 hours.
+            Output Slack-friendly Markdown.
+            
             Activity data:
             ${{ steps.collect.outputs.activity_json }}
       
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
       
+      - name: Debug Claude outputs
+        if: failure()
+        run: |
+          echo "Available step outputs:"
+          echo "completion: ${{ steps.claude.outputs.completion }}"
+          echo "response: ${{ steps.claude.outputs.response }}"
+          echo "text: ${{ steps.claude.outputs.text }}"
+      
       - name: Post to Slack
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
-          # try each possible output field from the Claude action
+          # Try different possible output names from Claude action
           CLAUDE_OUTPUT="${{ steps.claude.outputs.completion }}"
           if [ -z "$CLAUDE_OUTPUT" ]; then
             CLAUDE_OUTPUT="${{ steps.claude.outputs.response }}"
@@ -84,13 +85,15 @@ jobs:
           if [ -z "$CLAUDE_OUTPUT" ]; then
             CLAUDE_OUTPUT="${{ steps.claude.outputs.text }}"
           fi
-
-          # if Claude failed (e.g. credit too low), send a fallback message
+          
           if [ -z "$CLAUDE_OUTPUT" ]; then
-            CLAUDE_OUTPUT="Daily Dev Report: Claude could not generate a summary (likely API credit or model issue). Activity JSON was collected successfully."
+            echo "Error: Could not find Claude output. Available outputs may differ."
+            exit 1
           fi
           
+          # Escape the output for JSON and send to Slack
           REPORT_TEXT=$(echo "$CLAUDE_OUTPUT" | jq -Rs .)
           curl -X POST -H 'Content-type: application/json' \
             --data "{\"text\": $REPORT_TEXT}" \
             "$SLACK_WEBHOOK_URL"
+
