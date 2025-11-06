@@ -60,6 +60,14 @@ jobs:
             
             Activity data:
             ${{ steps.collect.outputs.activity_json }}
+
+      # NEW: dump all outputs so we can see what this action actually returns
+      - name: Debug Claude outputs
+        run: |
+          echo "Raw Claude outputs:"
+          echo '${{ toJson(steps.claude.outputs) }}'
+
+
       
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
