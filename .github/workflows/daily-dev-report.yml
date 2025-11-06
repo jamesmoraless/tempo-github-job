@@ -48,8 +48,7 @@ jobs:
         id: claude
         uses: anthropics/claude-code-action@beta
         with:
-          mode: agent  # Required for automation events (workflow_dispatch, schedule)
-          model: claude-3-5-sonnet-20241022
+          mode: agent                     # 👈 also tell it via inputs
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           direct_prompt: |
