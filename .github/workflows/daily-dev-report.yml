@@ -48,6 +48,7 @@ jobs:
         id: claude
         uses: anthropics/claude-code-action@beta
         with:
+          mode: agent  # Required for automation events (workflow_dispatch, schedule)
           model: claude-3-5-sonnet-20241022
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -64,14 +65,33 @@ jobs:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
       
+      - name: Debug Claude outputs
+        if: failure()
+        run: |
+          echo "Available step outputs:"
+          echo "completion: ${{ steps.claude.outputs.completion }}"
+          echo "response: ${{ steps.claude.outputs.response }}"
+          echo "text: ${{ steps.claude.outputs.text }}"
+      
       - name: Post to Slack
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          CLAUDE_OUTPUT: ${{ steps.claude.outputs.completion }}
         run: |
+          # Try different possible output names from Claude action
+          CLAUDE_OUTPUT="${{ steps.claude.outputs.completion }}"
+          if [ -z "$CLAUDE_OUTPUT" ]; then
+            CLAUDE_OUTPUT="${{ steps.claude.outputs.response }}"
+          fi
+          if [ -z "$CLAUDE_OUTPUT" ]; then
+            CLAUDE_OUTPUT="${{ steps.claude.outputs.text }}"
+          fi
+          
+          if [ -z "$CLAUDE_OUTPUT" ]; then
+            echo "Error: Could not find Claude output. Available outputs may differ."
+            exit 1
+          fi
+          
           # Escape the output for JSON and send to Slack
-          # Note: If the output name differs, check the action's documentation
-          # Common alternatives: steps.claude.outputs.response or steps.claude.outputs.text
           REPORT_TEXT=$(echo "$CLAUDE_OUTPUT" | jq -Rs .)
           curl -X POST -H 'Content-type: application/json' \
             --data "{\"text\": $REPORT_TEXT}" \
