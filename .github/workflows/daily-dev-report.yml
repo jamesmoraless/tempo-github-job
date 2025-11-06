@@ -72,14 +72,6 @@ jobs:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
       
-      - name: Debug Claude outputs
-        if: failure()
-        run: |
-          echo "Available step outputs:"
-          echo "completion: ${{ steps.claude.outputs.completion }}"
-          echo "response: ${{ steps.claude.outputs.response }}"
-          echo "text: ${{ steps.claude.outputs.text }}"
-      
       - name: Post to Slack
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
@@ -87,19 +79,16 @@ jobs:
           EXEC_FILE="${{ steps.claude.outputs.execution_file }}"
 
           if [ -z "$EXEC_FILE" ] || [ ! -f "$EXEC_FILE" ]; then
-            # fallback if file is missing
             MSG="Daily Dev Report: Claude ran but no execution file was found."
           else
-            # the file is JSON; pull out the 'result' field that you saw in the logs
-            MSG=$(cat "$EXEC_FILE" | jq -r '.result // empty')
+            # try: array[0].result → array[0].message → object.result → object.message
+            MSG=$(jq -r '.[0].result // .[0].message // .result // .message // empty' "$EXEC_FILE")
             if [ -z "$MSG" ]; then
-              MSG="Daily Dev Report: Claude ran but did not return a 'result' field."
+              MSG="Daily Dev Report: Claude ran but output was not in an expected shape. See workflow logs."
             fi
           fi
 
-          # escape + send to Slack
           PAYLOAD=$(printf '%s' "$MSG" | jq -Rs '{text: .}')
           curl -X POST -H 'Content-type: application/json' \
             --data "$PAYLOAD" \
             "$SLACK_WEBHOOK_URL"
-
