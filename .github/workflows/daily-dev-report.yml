@@ -58,12 +58,16 @@ jobs:
           label_trigger: ""               # 👈 disable label-based triggers
           direct_prompt: |
             You are generating a *daily dev activity report* for this GitHub repo.
-            You will receive JSON of PRs and commits from the last 24 hours.
-            Your tasks:
-            1. If there is no activity, say: "No activity in the last 24 hours."
-            2. Otherwise, group by developer (GitHub login if present).
-            3. For each developer, list PRs (number, title, merged/open) and commits (message).
-            4. Output Slack-friendly Markdown, short.
+            The JSON includes pull requests and commits from the past 24 hours with stats such as additions, deletions, changed_files, short_sha, html_url, and author identifiers (login, name, email).
+
+            Produce Slack-formatted Markdown with these rules:
+            1. If there is no activity, output exactly: "No activity in the last 24 hours."
+            2. Otherwise, group sections by developer. Prefer `author_login` / `user_login`; fall back to name or email, use "Unknown" if nothing is available.
+            3. For each developer, show totals of lines added and deleted from their commits (sum additions/deletions).
+            4. List commits as bullet points. Format each bullet as `<html_url|short_sha> – message (+additions/−deletions)`. If stats are missing, omit the additions/deletions portion.
+            5. List PRs they touched as bullet points. Include number, title, state (open/merged), additions/deletions/changed_files, and a short note if merged. Add the PR URL using `<html_url|PR #number>`.
+            6. For each PR, assign a *PR Quality Score* from 1 (needs work) to 5 (excellent). Base your score on size (additions/deletions), merge status, recency, number of commits, and any inferred polish. Give a one-line rationale per PR.
+            7. Keep the overall message concise (under ~400 words) but ensure key data is included.
 
             Activity data:
             ${{ steps.collect.outputs.activity_json }}
