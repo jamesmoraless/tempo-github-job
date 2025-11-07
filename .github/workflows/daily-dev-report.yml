@@ -48,7 +48,8 @@ jobs:
         id: claude
         uses: anthropics/claude-code-action@beta
         with:
-          mode: agent                     # 👈 also tell it via inputs
+          mode: agent  # Required for automation events (workflow_dispatch, schedule)
+          model: claude-3-5-sonnet-20241022
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           direct_prompt: |
@@ -60,35 +61,39 @@ jobs:
             
             Activity data:
             ${{ steps.collect.outputs.activity_json }}
-
-      # NEW: dump all outputs so we can see what this action actually returns
-      - name: Debug Claude outputs
-        run: |
-          echo "Raw Claude outputs:"
-          echo '${{ toJson(steps.claude.outputs) }}'
-
-
       
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
+      
+      - name: Debug Claude outputs
+        if: failure()
+        run: |
+          echo "Available step outputs:"
+          echo "completion: ${{ steps.claude.outputs.completion }}"
+          echo "response: ${{ steps.claude.outputs.response }}"
+          echo "text: ${{ steps.claude.outputs.text }}"
       
       - name: Post to Slack
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
-          EXEC_FILE="${{ steps.claude.outputs.execution_file }}"
-
-          if [ -z "$EXEC_FILE" ] || [ ! -f "$EXEC_FILE" ]; then
-            MSG="Daily Dev Report: Claude ran but no execution file was found."
-          else
-            # try: array[0].result → array[0].message → object.result → object.message
-            MSG=$(jq -r '.[0].result // .[0].message // .result // .message // empty' "$EXEC_FILE")
-            if [ -z "$MSG" ]; then
-              MSG="Daily Dev Report: Claude ran but output was not in an expected shape. See workflow logs."
-            fi
+          # Try different possible output names from Claude action
+          CLAUDE_OUTPUT="${{ steps.claude.outputs.completion }}"
+          if [ -z "$CLAUDE_OUTPUT" ]; then
+            CLAUDE_OUTPUT="${{ steps.claude.outputs.response }}"
           fi
-
-          PAYLOAD=$(printf '%s' "$MSG" | jq -Rs '{text: .}')
+          if [ -z "$CLAUDE_OUTPUT" ]; then
+            CLAUDE_OUTPUT="${{ steps.claude.outputs.text }}"
+          fi
+          
+          if [ -z "$CLAUDE_OUTPUT" ]; then
+            echo "Error: Could not find Claude output. Available outputs may differ."
+            exit 1
+          fi
+          
+          # Escape the output for JSON and send to Slack
+          REPORT_TEXT=$(echo "$CLAUDE_OUTPUT" | jq -Rs .)
           curl -X POST -H 'Content-type: application/json' \
-            --data "$PAYLOAD" \
+            --data "{\"text\": $REPORT_TEXT}" \
             "$SLACK_WEBHOOK_URL"
+
